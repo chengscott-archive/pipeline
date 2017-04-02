@@ -1,0 +1,6 @@
+makefile.test
+# output
+pipeline
+*.bin
+*.rpt
+*.o
