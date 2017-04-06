@@ -2,6 +2,7 @@
 #include "memory.hpp"
 #include "regfile.hpp"
 #include "irfile.hpp"
+#include "buffer.hpp"
 // ERR constant
 #define ERR_WRITE_REG_ZERO 0x1 // continue
 #define ERR_NUMBER_OVERFLOW 0x10  // continue
@@ -26,9 +27,16 @@
 
 memory mem;
 regfile reg, regt;
+buffer IF_ID, ID_EX, EX_MEM, MEM_WB;
 FILE *snapshot, *error_dump;
 
+void dump_error(const uint32_t, const size_t);
 void dump_reg(const size_t);
+void WB();
+void MEM();
+void EX();
+void ID();
+void IF();
 void R_execute(const uint32_t);
 void I_execute(const uint32_t);
 void J_execute(const uint32_t);

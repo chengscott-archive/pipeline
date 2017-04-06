@@ -8,43 +8,34 @@ int main() {
     reg.setReg(29, SP);
     dump_reg(0);
     for (size_t cycle = 1; cycle <= 500000; ++cycle) {
-        uint32_t instr = mem.getInstr();
-        const char type = IR::getType(instr);
-        try {
-            if (type == 'R') R_execute(instr);
-            else if (type == 'I') I_execute(instr);
-            else if (type == 'J') J_execute(instr);
-            else if (type == 'S') break;
-            else {
-                printf("illegal instruction found at 0x%08X\n", mem.getPC());
-                break;
-            }
-        } catch (uint32_t ex) {
-            // dump error
-            if (ex & ERR_WRITE_REG_ZERO) {
-                fprintf(error_dump, "In cycle %zu: Write $0 Error\n", cycle);
-            }
-            if (ex & ERR_NUMBER_OVERFLOW) {
-                fprintf(error_dump, "In cycle %zu: Number Overflow\n", cycle);
-            }
-            if (ex & ERR_OVERWRTIE_REG_HI_LO) {
-                fprintf(error_dump,
-                        "In cycle %zu: Overwrite HI-LO registers\n",
-                        cycle);
-            }
-            if (ex & ERR_ADDRESS_OVERFLOW) {
-                fprintf(error_dump, "In cycle %zu: Address Overflow\n", cycle);
-            }
-            if (ex & ERR_MISALIGNMENT) {
-                fprintf(error_dump, "In cycle %zu: Misalignment Error\n", cycle);
-            }
-            if (ex & HALT) break;
-        }
+        WB();
+        MEM();
+        EX();
+        ID();
+        IF();
         dump_reg(cycle);
     }
     fclose(snapshot);
     fclose(error_dump);
     return 0;
+}
+
+void dump_error(const uint32_t ex, const size_t cycle) {
+    if (ex & ERR_WRITE_REG_ZERO) {
+        fprintf(error_dump, "In cycle %zu: Write $0 Error\n", cycle);
+    }
+    if (ex & ERR_NUMBER_OVERFLOW) {
+        fprintf(error_dump, "In cycle %zu: Number Overflow\n", cycle);
+    }
+    if (ex & ERR_OVERWRTIE_REG_HI_LO) {
+        fprintf(error_dump, "In cycle %zu: Overwrite HI-LO registers\n", cycle);
+    }
+    if (ex & ERR_ADDRESS_OVERFLOW) {
+        fprintf(error_dump, "In cycle %zu: Address Overflow\n", cycle);
+    }
+    if (ex & ERR_MISALIGNMENT) {
+        fprintf(error_dump, "In cycle %zu: Misalignment Error\n", cycle);
+    }
 }
 
 void dump_reg(const size_t cycle) {
@@ -58,7 +49,46 @@ void dump_reg(const size_t cycle) {
     if (cycle == 0 || reg.getLO() != regt.getLO())
         fprintf(snapshot, "$LO: 0x%08X\n", reg.getLO());
     fprintf(snapshot, "PC: 0x%08X\n\n\n", mem.getPC());
+    // IF, ID, EX, DM WB
     regt = reg;
+}
+
+void WB() {
+
+}
+
+void MEM() {
+
+}
+
+void EX() {
+    const char type = ID_EX.instr_->type;
+    try {
+        if (type == 'R') R_execute(IF_ID.RawInstr_);
+        else if (type == 'I') I_execute(IF_ID.RawInstr_);
+        else if (type == 'J') J_execute(IF_ID.RawInstr_);
+        else if (type == 'S') ;
+        else {
+            printf("illegal instruction found at 0x%08X\n", mem.getPC());
+            //break;
+        }
+    } catch (uint32_t ex) {
+        //dump_error(ex, cycle);
+        //if (ex & HALT) break;
+    }
+}
+
+void ID() {
+    const char type = IR::getType(IF_ID.RawInstr_);
+    if (type == 'R') ID_EX.instr_ = new IR::R_type(IR::R_decode(IF_ID.RawInstr_));
+    else if (type == 'I') ID_EX.instr_ = new IR::I_type(IR::I_decode(IF_ID.RawInstr_));
+    else if (type == 'J') ID_EX.instr_ = new IR::J_type(IR::J_decode(IF_ID.RawInstr_));
+    else if (type == 'S') ID_EX.instr_ = new IR::S_type(IR::S_decode(IF_ID.RawInstr_));
+    else ; // Invalid Instr
+}
+
+void IF () {
+    IF_ID.RawInstr_ = mem.getInstr();
 }
 
 void R_execute(const uint32_t rhs) {
