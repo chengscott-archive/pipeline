@@ -1,7 +1,6 @@
 #include <fstream>
 #include "memory.hpp"
 #include "regfile.hpp"
-#include "irfile.hpp"
 #include "buffer.hpp"
 // ERR constant
 #define ERR_WRITE_REG_ZERO 0x1 // continue
@@ -27,7 +26,10 @@
 
 memory mem;
 regfile reg, regt;
-buffer IF_ID, ID_EX, EX_MEM, MEM_WB;
+IFID_Buffer IF_ID;
+IDEX_Buffer ID_EX;
+EXMEM_Buffer EX_MEM;
+MEMWB_Buffer MEM_WB;
 FILE *snapshot, *error_dump;
 
 void dump_error(const uint32_t, const size_t);
@@ -37,6 +39,7 @@ void MEM();
 void EX();
 void ID();
 void IF();
-void R_execute(const uint32_t);
-void I_execute(const uint32_t);
-void J_execute(const uint32_t);
+char getType(const uint32_t);
+void R_execute();
+void I_execute();
+void J_execute();
