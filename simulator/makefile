@@ -1,7 +1,7 @@
 CC0 = g++ -std=c++11 -O3 -Wall
 CC = g++ -std=c++11 -g -Wall
 OBJ = main.o memory.o
-archiTA = ../../archiTA
+archiTA = ../archiTA
 goldensim = $(archiTA)/simulator/pipeline
 
 all: pipeline
@@ -14,7 +14,7 @@ pipeline: ${OBJ}
 
 .PNOHY: run
 run: clean golden pipeline
-	./pipline
+	./pipeline
 	diff snapshot.rpt diff/snapshot.rpt
 	diff error_dump.rpt diff/error_dump.rpt
 

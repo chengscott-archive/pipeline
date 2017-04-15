@@ -1,7 +1,10 @@
 #include <fstream>
+#include <iostream>
+#include <string>
 #include "memory.hpp"
 #include "regfile.hpp"
 #include "buffer.hpp"
+using std::string;
 // ERR constant
 #define ERR_WRITE_REG_ZERO 0x1 // continue
 #define ERR_NUMBER_OVERFLOW 0x10  // continue
@@ -25,7 +28,7 @@
     ERR_NUMBER_OVERFLOW : 0)
 
 memory mem;
-regfile reg, regt;
+regfile reg;
 IFID_Buffer IF_ID;
 IDEX_Buffer ID_EX;
 EXMEM_Buffer EX_MEM;
@@ -33,12 +36,13 @@ MEMWB_Buffer MEM_WB;
 FILE *snapshot, *error_dump;
 
 void dump_error(const uint32_t, const size_t);
-void dump_reg(const size_t);
-void WB();
-void MEM();
-void EX();
-void ID();
+string WB();
+string MEM();
+string EX();
+string ID();
 void IF();
+string getFunctName(const uint32_t);
+string getOpName(const uint32_t);
 char getType(const uint32_t);
 void R_execute();
 void I_execute();
