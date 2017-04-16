@@ -32,7 +32,7 @@ regfile reg;
 IFID_Buffer IF_ID;
 IDEX_Buffer ID_EX;
 EXMEM_Buffer EX_MEM;
-MEMWB_Buffer MEM_WB;
+MEMWB_Buffer MEM_WB, MEM_WB_t;
 FILE *snapshot, *error_dump;
 
 void dump_error(const uint32_t, const size_t);

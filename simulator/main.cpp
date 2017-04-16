@@ -9,17 +9,20 @@ int main() {
     string stages[5];
     for (size_t cycle = 0; cycle <= 500000; ++cycle) {
         fprintf(snapshot, "cycle %zu\n", cycle);
-        stages[4] = WB();
-        stages[3] = MEM();
-        stages[2] = EX();
-        stages[1] = ID();
         if (cycle == 0) {
             for (int i = 0; i < 32; ++i) {
                 fprintf(snapshot, "$%02d: 0x%08X\n", i, 0);
             }
             fprintf(snapshot, "$HI: 0x%08X\n$LO: 0x%08X\n", 0, 0);
         }
+        if (MEM_WB_t.RegWrite || MEM_WB_t.MemtoReg) {
+            fprintf(snapshot, "$%02d: 0x%08X\n", MEM_WB_t.WriteDest, MEM_WB_t.rt_data);
+        }
         fprintf(snapshot, "PC: 0x%08X\n", mem.getPC());
+        stages[4] = WB();
+        stages[3] = MEM();
+        stages[2] = EX();
+        stages[1] = ID();
         IF();
         fprintf(snapshot, "IF: 0x%08X\nID: %s\nEX: %s\nDM: %s\nWB: %s\n\n\n",
             IF_ID.instr, stages[1].c_str(), stages[2].c_str(),
@@ -51,15 +54,20 @@ void dump_error(const uint32_t ex, const size_t cycle) {
 }
 
 string WB() {
-    //ID_EX.RegWrite = MEM_WB.RegWrite;
-    if (MEM_WB.MemtoReg) {
-        reg.setReg(MEM_WB.WriteDest, MEM_WB.rt_data);
+    MEM_WB_t = MEM_WB;
+    const uint32_t& dest = MEM_WB.WriteDest,
+            data = MEM_WB.rt_data;
+    if (MEM_WB.RegWrite || MEM_WB.MemtoReg) {
+        if (reg.getReg(dest) == data) // unchange
+            MEM_WB_t.RegWrite = MEM_WB_t.MemtoReg = false;
+        reg.setReg(dest, data);
     }
     return getOpName(MEM_WB.instr);
 }
 
 string MEM() {
     MEM_WB.instr = EX_MEM.instr;
+    MEM_WB.rt_data = EX_MEM.ALU_Result;
     MEM_WB.MemtoReg = EX_MEM.MemtoReg;
     MEM_WB.RegWrite = EX_MEM.RegWrite;
     MEM_WB.WriteDest = EX_MEM.WriteDest;
@@ -140,7 +148,7 @@ string ID() {
             break;
         }
         default: {
-            // Invalid Instr
+            // TODO: Invalid Instr
         }
     }
     return getOpName(instr);
@@ -230,6 +238,10 @@ void R_execute() {
     EX_MEM.ALU_Zero = EX_MEM.MemWrite = EX_MEM.MemRead = EX_MEM.MemtoReg = false;
     EX_MEM.RegWrite = true;
     EX_MEM.WriteDest = ID_EX.rd;
+    if(ID_EX.instr == 0) { // NOP
+        EX_MEM.RegWrite = false;
+        return ;
+    }
     if (funct == 0x08) {
         // jr
         mem.setPC(rs_data);

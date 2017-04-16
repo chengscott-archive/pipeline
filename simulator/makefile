@@ -27,6 +27,10 @@ golden: dimage.bin iimage.bin
 test: clean pipeline
 	make -f makefile.test
 
+.PNOHY: debug
+debug: pipeline
+	gdb pipeline
+
 .PHONY: clean
 clean:
 	rm -f pipeline *.o *.rpt
