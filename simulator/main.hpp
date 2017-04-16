@@ -1,17 +1,18 @@
+#include <iostream> // DEBUG
 #include <fstream>
-#include <iostream>
 #include <string>
 #include "memory.hpp"
 #include "regfile.hpp"
 #include "buffer.hpp"
-using std::string;
+#include "irfile.hpp"
 // ERR constant
 #define ERR_WRITE_REG_ZERO 0x1 // continue
 #define ERR_NUMBER_OVERFLOW 0x10  // continue
 #define ERR_OVERWRTIE_REG_HI_LO 0x100 // continue
 #define ERR_ADDRESS_OVERFLOW 0x1000 // halt
 #define ERR_MISALIGNMENT 0x10000 // halt
-#define HALT (ERR_ADDRESS_OVERFLOW | ERR_MISALIGNMENT) // halt code
+#define ERR_ILLEGAL 0x100000
+#define HALT (ERR_ADDRESS_OVERFLOW | ERR_MISALIGNMENT | ERR_ILLEGAL) // halt
 // 32-bit C sign extend to 64-bit
 #define SignExt32(C) (((C) >> 31 == 0x0) ?\
     ((C) & 0x00000000ffffffff) : ((C) | 0xffffffff00000000))
@@ -36,14 +37,12 @@ MEMWB_Buffer MEM_WB, MEM_WB_t;
 FILE *snapshot, *error_dump;
 
 void dump_error(const uint32_t, const size_t);
-string WB();
-string MEM();
-string EX();
-string ID();
+void WB();
+void MEM();
+void EX();
+void ID();
 void IF();
-string getFunctName(const uint32_t);
-string getOpName(const uint32_t);
-char getType(const uint32_t);
-void R_execute();
-void I_execute();
-void J_execute();
+uint32_t R_execute();
+uint32_t I_execute();
+uint32_t J_execute();
+std::string stages[5];

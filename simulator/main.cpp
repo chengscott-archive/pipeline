@@ -6,7 +6,6 @@ int main() {
     mem.LoadInstr();
     uint32_t SP = mem.LoadData();
     reg.setReg(29, SP);
-    string stages[5];
     for (size_t cycle = 0; cycle <= 500000; ++cycle) {
         fprintf(snapshot, "cycle %zu\n", cycle);
         if (cycle == 0) {
@@ -19,15 +18,20 @@ int main() {
             fprintf(snapshot, "$%02d: 0x%08X\n", MEM_WB_t.WriteDest, MEM_WB_t.rt_data);
         }
         fprintf(snapshot, "PC: 0x%08X\n", mem.getPC());
-        stages[4] = WB();
-        stages[3] = MEM();
-        stages[2] = EX();
-        stages[1] = ID();
-        IF();
+        try {
+            WB();
+            MEM();
+            EX();
+            ID();
+            IF();
+        } catch (uint32_t err) {
+            dump_error(err, cycle);
+            // if (err & HALT) break;
+        }
         fprintf(snapshot, "IF: 0x%08X\nID: %s\nEX: %s\nDM: %s\nWB: %s\n\n\n",
             IF_ID.instr, stages[1].c_str(), stages[2].c_str(),
             stages[3].c_str(), stages[4].c_str());
-        if (getOpName(IF_ID.instr) == "HALT" && stages[1] == "HALT" &&
+        if (IR::getOpName(IF_ID.instr) == "HALT" && stages[1] == "HALT" &&
             stages[2] == "HALT" && stages[3] == "HALT" && stages[4] == "HALT") break;
     }
     fclose(snapshot);
@@ -51,21 +55,25 @@ void dump_error(const uint32_t ex, const size_t cycle) {
     if (ex & ERR_MISALIGNMENT) {
         fprintf(error_dump, "In cycle %zu: Misalignment Error\n", cycle);
     }
+    if (ex & ERR_ILLEGAL) {
+        printf("illegal instruction found at 0x%08X\n", mem.getPC());
+    }
 }
 
-string WB() {
+void WB() {
+    stages[4] = IR::getOpName(MEM_WB.instr);
     MEM_WB_t = MEM_WB;
-    const uint32_t& dest = MEM_WB.WriteDest,
-            data = MEM_WB.rt_data;
+    const uint32_t& dest = MEM_WB.WriteDest, data = MEM_WB.rt_data;
     if (MEM_WB.RegWrite || MEM_WB.MemtoReg) {
         if (reg.getReg(dest) == data) // unchange
             MEM_WB_t.RegWrite = MEM_WB_t.MemtoReg = false;
-        reg.setReg(dest, data);
+        if (dest == 0) throw ERR_WRITE_REG_ZERO;
+        else reg.setReg(dest, data);
     }
-    return getOpName(MEM_WB.instr);
 }
 
-string MEM() {
+void MEM() {
+    stages[3] = IR::getOpName(EX_MEM.instr);
     MEM_WB.instr = EX_MEM.instr;
     MEM_WB.rt_data = EX_MEM.ALU_Result;
     MEM_WB.MemtoReg = EX_MEM.MemtoReg;
@@ -75,52 +83,63 @@ string MEM() {
             MemWrite = EX_MEM.MemWrite,
             MemRead = EX_MEM.MemRead,
             ALU_Result = EX_MEM.ALU_Result;
-    // TODO: error
+    uint32_t err = 0;
+    // TODO: add overflow: sw, sh, lw, lh, lhu
     if (opcode == 0x2B && MemWrite) { // sw
+        err |= (ALU_Result >= 1024 || ALU_Result + 1 >= 1024 ||
+            ALU_Result + 2 >= 1024 || ALU_Result + 3 >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
+        err |= (ALU_Result % 4 != 0 ? ERR_MISALIGNMENT : 0);
+        if (err & HALT) throw err;
         mem.saveWord(EX_MEM.WriteDest, ALU_Result);
     } else if (opcode == 0x29 && MemWrite) { // sh
+        err |= (ALU_Result >= 1024 || ALU_Result + 1 >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
+        err |= (ALU_Result % 2 != 0 ? ERR_MISALIGNMENT : 0);
         mem.saveHalfWord(EX_MEM.WriteDest, ALU_Result);
     } else if (opcode == 0x28 && MemWrite) { // sb
+        err |= (ALU_Result >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
         mem.saveByte(EX_MEM.WriteDest, ALU_Result);
     } else if (opcode == 0x23 && MemRead) { // lw
+        err |= (ALU_Result >= 1024 || ALU_Result + 1 >= 1024 ||
+            ALU_Result + 2 >= 1024 || ALU_Result + 3 >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
+        err |= (ALU_Result % 4 != 0 ? ERR_MISALIGNMENT : 0);
         MEM_WB.rt_data = mem.loadWord(ALU_Result);
     } else if (opcode == 0x21 && MemRead) { // lh
+        err |= (ALU_Result >= 1024 || ALU_Result + 1 >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
+        err |= (ALU_Result % 2 != 0 ? ERR_MISALIGNMENT : 0);
         MEM_WB.rt_data = SignExt16(mem.loadHalfWord(ALU_Result));
     } else if (opcode == 0x25 && MemRead) { // lhu
+        err |= (ALU_Result >= 1024 || ALU_Result + 1 >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
+        err |= (ALU_Result % 2 != 0 ? ERR_MISALIGNMENT : 0);
         MEM_WB.rt_data = mem.loadHalfWord(ALU_Result) & 0xffff;
     } else if (opcode == 0x20 && MemRead) { // lb
+        err |= (ALU_Result >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
         MEM_WB.rt_data = SignExt8(mem.loadByte(ALU_Result));
     } else if (opcode == 0x24 && MemRead) { // lbu
+        err |= (ALU_Result >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
         MEM_WB.rt_data = mem.loadByte(ALU_Result) & 0xff;
     }
-    return getOpName(EX_MEM.instr);
+    if (err != 0) throw err;
 }
 
-string EX() {
+void EX() {
+    stages[2] = IR::getOpName(ID_EX.instr);
     EX_MEM.instr = ID_EX.instr;
     EX_MEM.opcode = ID_EX.opcode;
-    try {
-        switch (ID_EX.type) {
-            case 'R': { R_execute(); break; }
-            case 'I': { I_execute(); break; }
-            case 'J': { J_execute(); break; }
-            case 'S': { break; }
-            default: {
-                printf("illegal instruction found at 0x%08X\n", mem.getPC());
-                //break;
-            }
-        }
-    } catch (uint32_t ex) {
-        //dump_error(ex, cycle);
-        //if (ex & HALT) break;
+    uint32_t err;
+    switch (ID_EX.type) {
+        case 'R': { err = R_execute(); break; }
+        case 'I': { err = I_execute(); break; }
+        case 'J': { err = J_execute(); break; }
+        case 'S': default: { break; }
     }
-    return getOpName(ID_EX.instr);
+    if (err != 0) throw err;
 }
 
-string ID() {
+void ID() {
     const uint32_t instr = IF_ID.instr;
+    stages[1] = IR::getOpName(instr);
     ID_EX.instr = instr;
-    ID_EX.type = getType(instr);
+    ID_EX.type = IR::getType(instr);
     switch (ID_EX.type) {
         case 'R': {
             ID_EX.opcode = (instr >> 26) & 0x3f;
@@ -148,10 +167,9 @@ string ID() {
             break;
         }
         default: {
-            // TODO: Invalid Instr
+            throw ERR_ILLEGAL;
         }
     }
-    return getOpName(instr);
 }
 
 void IF() {
@@ -159,77 +177,7 @@ void IF() {
     IF_ID.instr = mem.getInstr();
 }
 
-char getType(const uint32_t rhs) {
-    uint32_t opcode = (rhs >> 26) & 0x3f;
-    switch (opcode) {
-        case 0x0:
-            return 'R';
-        case 0x2: case 0x3:
-            return 'J';
-        case 0x3f:
-            return 'S';
-        case 0x08: case 0x09: case 0x23: case 0x21: case 0x25: case 0x20:
-        case 0x24: case 0x2B: case 0x29: case 0x28: case 0x0F: case 0x0C:
-        case 0x0D: case 0x0E: case 0x0A: case 0x04: case 0x05: case 0x07:
-            return 'I';
-    }
-    return 'F';
-}
-
-string getFunctName(const uint32_t funct) {
-    switch (funct) {
-        case 0x20: return "ADD";
-        case 0x21: return "ADDU";
-        case 0x22: return "SUB";
-        case 0x24: return "AND";
-        case 0x25: return "OR";
-        case 0x26: return "XOR";
-        case 0x27: return "NOR";
-        case 0x28: return "NAND";
-        case 0x2A: return "SLT";
-        case 0x00: return "SLL";
-        case 0x02: return "SRL";
-        case 0x03: return "SRA";
-        case 0x08: return "JR";
-        case 0x18: return "MULT";
-        case 0x19: return "MULTU";
-        case 0x10: return "MFHI";
-        case 0x12: return "MFLO";
-    }
-    return "";
-}
-
-string getOpName(const uint32_t instr) {
-    if (instr == 0) return "NOP";
-    const uint32_t opcode = (instr >> 26) & 0x3f;
-    switch (opcode) {
-        case 0x0: return getFunctName(instr & 0x3f);
-        case 0x2: return "J";
-        case 0x3: return "JAL";
-        case 0x3f: return "HALT";
-        case 0x08: return "ADDI";
-        case 0x09: return "ADDIU";
-        case 0x23: return "LW";
-        case 0x21: return "LH";
-        case 0x25: return "LHU";
-        case 0x20: return "LB";
-        case 0x24: return "LBU";
-        case 0x2B: return "SW";
-        case 0x29: return "SH";
-        case 0x28: return "SB";
-        case 0x0F: return "LUI";
-        case 0x0C: return "ANDI";
-        case 0x0D: return "ORI";
-        case 0x0E: return "NORI";
-        case 0x0A: return "SLTI";
-        case 0x04: return "BEQ";
-        case 0x05: return "BNE";
-        case 0x07: return "BGTZ";
-    }
-    return "";
-}
-
-void R_execute() {
+uint32_t R_execute() {
     const uint32_t& funct = ID_EX.funct,
             rs_data = ID_EX.rs_data,
             rt_data = ID_EX.rt_data;
@@ -240,7 +188,7 @@ void R_execute() {
     EX_MEM.WriteDest = ID_EX.rd;
     if(ID_EX.instr == 0) { // NOP
         EX_MEM.RegWrite = false;
-        return ;
+        return 0;
     }
     if (funct == 0x08) {
         // jr
@@ -300,10 +248,10 @@ void R_execute() {
         EX_MEM.ALU_Result = res;
         if (ID_EX.rd == 0) err |= ERR_WRITE_REG_ZERO;
     }
-    if (err != 0) throw err;
+    return err;
 }
 
-void I_execute() {
+uint32_t I_execute() {
     const uint32_t& opcode = ID_EX.opcode,
             rs_data = ID_EX.rs_data,
             rt_data = ID_EX.rt_data,
@@ -371,10 +319,10 @@ void I_execute() {
         }
     }
     EX_MEM.ALU_Result = res;
-    if (err != 0) throw err;
+    return err;
 }
 
-void J_execute() {
+uint32_t J_execute() {
     EX_MEM.ALU_Zero = EX_MEM.MemWrite =
         EX_MEM.MemRead = EX_MEM.MemtoReg = EX_MEM.RegWrite = false;
     if (ID_EX.opcode == 0x03) {
@@ -385,4 +333,5 @@ void J_execute() {
     }
     // j && jal: PC = {(PC+4)[31:28], C, 2'b0}
     mem.setPC((mem.getPC() & 0xf0000000) | (ID_EX.C << 2));
+    return 0;
 }
