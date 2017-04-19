@@ -46,3 +46,4 @@ uint32_t R_execute();
 uint32_t I_execute();
 uint32_t J_execute();
 std::string stages[5];
+bool stall = false;

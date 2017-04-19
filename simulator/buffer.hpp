@@ -1,7 +1,7 @@
 #pragma once
 
 struct IFID_Buffer {
-    uint32_t instr = 0;
+    uint32_t instr = 0, rs, rt;
 };
 
 struct IDEX_Buffer {
@@ -11,14 +11,13 @@ struct IDEX_Buffer {
 
 struct EXMEM_Buffer {
     uint32_t instr = 0, opcode = 0, ALU_Result, WriteDest;
-    bool ALU_Zero = false, MemWrite = false, MemRead = false,
-            MemtoReg = false, RegWrite = false;
+    bool MemWrite = false, MemRead = false, RegWrite = false;
 };
 
 struct MEMWB_Buffer {
     MEMWB_Buffer() = default;
-    MEMWB_Buffer(const MEMWB_Buffer& rhs) : rt_data(rhs.rt_data), WriteDest(rhs.WriteDest),
-        MemtoReg(rhs.MemtoReg), RegWrite(rhs.RegWrite) {};
+    MEMWB_Buffer(const MEMWB_Buffer& rhs) : instr(rhs.instr), rt_data(rhs.rt_data),
+        WriteDest(rhs.WriteDest), RegWrite(rhs.RegWrite) {};
     uint32_t instr = 0, rt_data, WriteDest;
-    bool MemtoReg = false, RegWrite = false;
+    bool RegWrite = false, RegPrint = false;
 };

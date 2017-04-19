@@ -8,7 +8,7 @@ public:
     uint32_t LoadData();
     const uint32_t& getPC() const { return PC_; }
     void setPC(const uint32_t& rhs) { PC_ = rhs; }
-    const uint32_t getInstr();
+    const uint32_t getInstr() const;
     const uint32_t loadWord(const size_t) const;
     const uint32_t loadHalfWord(const size_t) const;
     const uint32_t loadByte(const size_t) const;

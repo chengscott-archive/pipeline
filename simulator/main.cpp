@@ -14,7 +14,7 @@ int main() {
             }
             fprintf(snapshot, "$HI: 0x%08X\n$LO: 0x%08X\n", 0, 0);
         }
-        if (MEM_WB_t.RegWrite || MEM_WB_t.MemtoReg) {
+        if (MEM_WB_t.RegPrint) {
             fprintf(snapshot, "$%02d: 0x%08X\n", MEM_WB_t.WriteDest, MEM_WB_t.rt_data);
         }
         fprintf(snapshot, "PC: 0x%08X\n", mem.getPC());
@@ -23,13 +23,14 @@ int main() {
             MEM();
             EX();
             ID();
+            fprintf(snapshot, "IF: 0x%08X", mem.getInstr());
             IF();
         } catch (uint32_t err) {
             dump_error(err, cycle);
             // if (err & HALT) break;
         }
-        fprintf(snapshot, "IF: 0x%08X\nID: %s\nEX: %s\nDM: %s\nWB: %s\n\n\n",
-            IF_ID.instr, stages[1].c_str(), stages[2].c_str(),
+        fprintf(snapshot, "%s\nID: %s\nEX: %s\nDM: %s\nWB: %s\n\n\n",
+            stages[0].c_str(), stages[1].c_str(), stages[2].c_str(),
             stages[3].c_str(), stages[4].c_str());
         if (IR::getOpName(IF_ID.instr) == "HALT" && stages[1] == "HALT" &&
             stages[2] == "HALT" && stages[3] == "HALT" && stages[4] == "HALT") break;
@@ -60,13 +61,16 @@ void dump_error(const uint32_t ex, const size_t cycle) {
     }
 }
 
+/**
+* Five Stages
+*/
+
 void WB() {
     stages[4] = IR::getOpName(MEM_WB.instr);
     MEM_WB_t = MEM_WB;
     const uint32_t& dest = MEM_WB.WriteDest, data = MEM_WB.rt_data;
-    if (MEM_WB.RegWrite || MEM_WB.MemtoReg) {
-        if (reg.getReg(dest) == data) // unchange
-            MEM_WB_t.RegWrite = MEM_WB_t.MemtoReg = false;
+    if (MEM_WB.RegWrite) {
+        MEM_WB_t.RegPrint = reg.getReg(dest) != data; // change
         if (dest == 0) throw ERR_WRITE_REG_ZERO;
         else reg.setReg(dest, data);
     }
@@ -76,7 +80,6 @@ void MEM() {
     stages[3] = IR::getOpName(EX_MEM.instr);
     MEM_WB.instr = EX_MEM.instr;
     MEM_WB.rt_data = EX_MEM.ALU_Result;
-    MEM_WB.MemtoReg = EX_MEM.MemtoReg;
     MEM_WB.RegWrite = EX_MEM.RegWrite;
     MEM_WB.WriteDest = EX_MEM.WriteDest;
     const uint32_t& opcode = EX_MEM.opcode,
@@ -125,6 +128,27 @@ void EX() {
     stages[2] = IR::getOpName(ID_EX.instr);
     EX_MEM.instr = ID_EX.instr;
     EX_MEM.opcode = ID_EX.opcode;
+    // fwd_EX-DM, fwd_DM-WB
+    bool has_rs = IR::has_rs(EX_MEM.instr);
+    if (EX_MEM.RegWrite && EX_MEM.WriteDest != 0 && has_rs && EX_MEM.WriteDest == ID_EX.rs) {
+        ID_EX.rs = EX_MEM.WriteDest;
+        ID_EX.rs_data = EX_MEM.ALU_Result;
+        stages[2] += " fwd_EX-DM_rs_$" + std::to_string(EX_MEM.WriteDest);
+    } else if (MEM_WB_t.RegWrite && MEM_WB_t.WriteDest != 0 && has_rs && MEM_WB_t.WriteDest == ID_EX.rs) {
+        ID_EX.rs = MEM_WB_t.WriteDest;
+        ID_EX.rs_data = MEM_WB_t.rt_data;
+        stages[2] += " fwd_DM-WB_rs_$" + std::to_string(MEM_WB_t.WriteDest);
+    }
+    bool has_rt = IR::has_rt(EX_MEM.instr);
+    if (EX_MEM.RegWrite && EX_MEM.WriteDest != 0 && has_rt && EX_MEM.WriteDest == ID_EX.rt) {
+        ID_EX.rt = EX_MEM.WriteDest;
+        ID_EX.rt_data = EX_MEM.ALU_Result;
+        stages[2] += " fwd_EX-DM_rt_$" + std::to_string(EX_MEM.WriteDest);
+    } else if (MEM_WB_t.RegWrite && MEM_WB_t.WriteDest != 0 && has_rt && MEM_WB_t.WriteDest == ID_EX.rt) {
+        ID_EX.rt = MEM_WB_t.WriteDest;
+        ID_EX.rt_data = MEM_WB_t.rt_data;
+        stages[2] += " fwd_DM-WB_rt_$" + std::to_string(MEM_WB_t.WriteDest);
+    }
     uint32_t err;
     switch (ID_EX.type) {
         case 'R': { err = R_execute(); break; }
@@ -136,8 +160,24 @@ void EX() {
 }
 
 void ID() {
-    const uint32_t instr = IF_ID.instr;
+    const uint32_t& instr = IF_ID.instr;
     stages[1] = IR::getOpName(instr);
+    // stall
+    if (IR::isMemRead(ID_EX.instr) && IF_ID.rs != 0 && ID_EX.rt == IF_ID.rs) {
+        stall = true;
+    }
+    if (IR::isMemRead(ID_EX.instr) && IF_ID.rt != 0 && ID_EX.rt == IF_ID.rt) {
+        stall = true;
+    }
+    if (stall) {
+        stages[1] += " to_be_stalled";
+        ID_EX.type = 'R';
+        ID_EX.instr = ID_EX.opcode = ID_EX.rs = ID_EX.rt = ID_EX.rd
+            = ID_EX.shamt = ID_EX.funct = ID_EX.C
+            = ID_EX.rs_data = ID_EX.rt_data = 0;
+        return;
+    }
+    // ID
     ID_EX.instr = instr;
     ID_EX.type = IR::getType(instr);
     switch (ID_EX.type) {
@@ -150,6 +190,10 @@ void ID() {
             ID_EX.funct = instr & 0x3f;
             ID_EX.rs_data = reg.getReg(ID_EX.rs);
             ID_EX.rt_data = reg.getReg(ID_EX.rt);
+            switch (ID_EX.funct) {
+                case 0x00: case 0x02: case 0x03: { break; }
+                case 0x08: { break; } // jr
+            }
             break;
         }
         case 'I': {
@@ -170,12 +214,41 @@ void ID() {
             throw ERR_ILLEGAL;
         }
     }
+    // beq, bne, bgtz (signed)
+    if (ID_EX.type == 'I' &&
+        (ID_EX.opcode == 0x04 || ID_EX.opcode == 0x05 || ID_EX.opcode == 0x07)) {
+        // {14'{C[15]}, C, 2'b0}
+        EX_MEM.MemWrite = EX_MEM.MemRead = EX_MEM.RegWrite = false;
+        EX_MEM.WriteDest = ID_EX.rt;
+        const int32_t Caddr = ID_EX.C >> 15 == 0x0 ? (0x0003ffff & (ID_EX.C << 2)) :
+            (0xfffc0000 | (ID_EX.C << 2));
+        if ((ID_EX.opcode == 0x04 && ID_EX.rs_data == ID_EX.rt_data) ||
+            (ID_EX.opcode == 0x05 && ID_EX.rs_data != ID_EX.rt_data) ||
+            (ID_EX.opcode == 0x07 && int32_t(ID_EX.rs_data) > 0))
+            mem.setPC(int32_t(mem.getPC()) + Caddr);
+    }
 }
 
 void IF() {
-    // TODO: stall
+    stages[0] = "";
+    // stall
+    if (stall) {
+        stages[0] = " to_be_stalled";
+        stall = false;
+        return;
+    }
     IF_ID.instr = mem.getInstr();
+    mem.setPC(mem.getPC() + 4);
+    IF_ID.rs = (IF_ID.instr >> 21) & 0x1f;
+    IF_ID.rt = (IF_ID.instr >> 16) & 0x1f;
 }
+
+/**
+* EX Stage
+* R type: R_execute()
+* I type: I_execute()
+* J type: J_execute()
+*/
 
 uint32_t R_execute() {
     const uint32_t& funct = ID_EX.funct,
@@ -183,10 +256,10 @@ uint32_t R_execute() {
             rt_data = ID_EX.rt_data;
     uint32_t res = 0, err = 0;
     // EX_MEM
-    EX_MEM.ALU_Zero = EX_MEM.MemWrite = EX_MEM.MemRead = EX_MEM.MemtoReg = false;
+    EX_MEM.MemWrite = EX_MEM.MemRead = false;
     EX_MEM.RegWrite = true;
     EX_MEM.WriteDest = ID_EX.rd;
-    if(ID_EX.instr == 0) { // NOP
+    if (ID_EX.instr == 0) { // NOP
         EX_MEM.RegWrite = false;
         return 0;
     }
@@ -194,12 +267,12 @@ uint32_t R_execute() {
         // jr
         mem.setPC(rs_data);
     } else if (funct == 0x18) {
-        // TODO: mult (signed)
+        // mult (signed)
         int64_t m = SignExt32(rs_data) * SignExt32(rt_data);
         bool isOverwrite = reg.setHILO(m >> 32, m & 0x00000000ffffffff);
         err |= (isOverwrite ? ERR_OVERWRTIE_REG_HI_LO : 0);
     } else if (funct == 0x19) {
-        // TODO: multu
+        // multu
         uint64_t m = uint64_t(rs_data) * uint64_t(rt_data);
         bool isOverwrite = reg.setHILO(m >> 32, m & 0x00000000ffffffff);
         err |= (isOverwrite ? ERR_OVERWRTIE_REG_HI_LO : 0);
@@ -258,24 +331,10 @@ uint32_t I_execute() {
             C = ID_EX.C;
     uint32_t res = 0, err = 0;
     // EX_MEM
-    EX_MEM.ALU_Zero = EX_MEM.MemWrite = EX_MEM.MemRead = EX_MEM.MemtoReg = false;
+    EX_MEM.MemWrite = EX_MEM.MemRead = false;
     EX_MEM.RegWrite = true;
     EX_MEM.WriteDest = ID_EX.rt;
     switch (opcode) {
-        // beq, bne, bgtz (signed)
-        case 0x04: case 0x05: case 0x07: {
-            // {14'{C[15]}, C, 2'b0}
-            const int32_t Caddr = C >> 15 == 0x0 ? (0x0003ffff & (C << 2)) :
-                (0xfffc0000 | (C << 2));
-            res = int32_t(mem.getPC()) + Caddr;
-            err |= isOverflow(mem.getPC(), Caddr, res);
-            if ((opcode == 0x04 && rs_data == rt_data) ||
-                (opcode == 0x05 && rs_data != rt_data) ||
-                (opcode == 0x07 && int32_t(rs_data) > 0))
-            mem.setPC(res);
-            EX_MEM.RegWrite = false;
-            break;
-        }
         // addi (signed)
         case 0x08: {
             const int32_t Cext = SignExt16(C);
@@ -304,7 +363,7 @@ uint32_t I_execute() {
             res = int32_t(rs_data) + Cext;
             err |= isOverflow(rs_data, Cext, res);
             EX_MEM.WriteDest = res;
-            res = ID_EX.rt_data;
+            res = rt_data;
             EX_MEM.MemWrite = true;
             EX_MEM.RegWrite = false;
             break;
@@ -314,7 +373,7 @@ uint32_t I_execute() {
             const int32_t Cext = SignExt16(C);
             res = int32_t(rs_data) + Cext;
             err |= isOverflow(rs_data, Cext, res);
-            EX_MEM.MemRead = EX_MEM.MemtoReg = true;
+            EX_MEM.MemRead = true;
             break;
         }
     }
@@ -323,8 +382,7 @@ uint32_t I_execute() {
 }
 
 uint32_t J_execute() {
-    EX_MEM.ALU_Zero = EX_MEM.MemWrite =
-        EX_MEM.MemRead = EX_MEM.MemtoReg = EX_MEM.RegWrite = false;
+    EX_MEM.MemWrite = EX_MEM.MemRead = EX_MEM.RegWrite = false;
     if (ID_EX.opcode == 0x03) {
         // jal
         EX_MEM.ALU_Result = mem.getPC();

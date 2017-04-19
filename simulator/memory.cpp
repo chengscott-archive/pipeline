@@ -29,10 +29,9 @@ uint32_t memory::LoadData() {
     return SP;
 }
 
-const uint32_t memory::getInstr() {
+const uint32_t memory::getInstr() const {
     uint32_t ret = 0;
     if (PC_ >= PC0_) ret = instr_[(PC_ - PC0_) / 4];
-    PC_ += 4;
     return ret;
 }
 

@@ -71,4 +71,43 @@ namespace IR {
         }
         return "";
     }
+
+    bool isMemRead(const uint32_t instr) {
+        const uint32_t opcode = (instr >> 26) & 0x3f;
+        switch (opcode) {
+            // lw, lh, lhu, lb, lbu
+            case 0x23: case 0x21: case 0x25: case 0x20: case 0x24: {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool has_rs(const uint32_t instr) {
+        const uint32_t opcode = (instr >> 26) & 0x3f;
+        if (instr == 0) return false;
+        if (opcode == 0x00) {
+            const uint32_t funct = instr & 0x3f;
+            switch (funct) {
+                case 0x00: case 0x02: case 0x03: case 0x10: case 0x12: return false;
+                default: return true;
+            }
+        }
+        if (opcode == 0x0F) return false;
+        return true;
+    }
+
+    bool has_rt(const uint32_t instr) {
+        const uint32_t opcode = (instr >> 26) & 0x3f;
+        if (instr == 0) return false;
+        if (opcode == 0x00) {
+            const uint32_t funct = instr & 0x3f;
+            switch (funct) {
+                case 0x08: case 0x10: case 0x12: return false;
+                default: return true;
+            }
+        }
+        if (opcode == 0x07) return false;
+        return true;
+    }
 }
