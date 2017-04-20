@@ -17,6 +17,12 @@ int main() {
         if (MEM_WB_t.RegPrint) {
             fprintf(snapshot, "$%02d: 0x%08X\n", MEM_WB_t.WriteDest, MEM_WB_t.rt_data);
         }
+        if (EX_MEM.isHILO & 0x01) {
+            fprintf(snapshot, "$HI: 0x%08X\n", reg.getHI());
+        }
+        if (EX_MEM.isHILO & 0x10) {
+            fprintf(snapshot, "$LO: 0x%08X\n", reg.getLO());
+        }
         fprintf(snapshot, "PC: 0x%08X\n", mem.getPC());
         try {
             WB();
@@ -69,8 +75,9 @@ void WB() {
     stages[4] = IR::getOpName(MEM_WB.instr);
     MEM_WB_t = MEM_WB;
     const uint32_t& dest = MEM_WB.WriteDest, data = MEM_WB.rt_data;
+    // print iff changed
     if (MEM_WB.RegWrite) {
-        MEM_WB_t.RegPrint = reg.getReg(dest) != data; // change
+        MEM_WB_t.RegPrint = reg.getReg(dest) != data;
         if (dest == 0) throw ERR_WRITE_REG_ZERO;
         else reg.setReg(dest, data);
     }
@@ -80,8 +87,8 @@ void MEM() {
     stages[3] = IR::getOpName(EX_MEM.instr);
     MEM_WB.instr = EX_MEM.instr;
     MEM_WB.rt_data = EX_MEM.ALU_Result;
-    MEM_WB.RegWrite = EX_MEM.RegWrite;
     MEM_WB.WriteDest = EX_MEM.WriteDest;
+    MEM_WB.RegWrite = EX_MEM.RegWrite;
     const uint32_t& opcode = EX_MEM.opcode,
             MemWrite = EX_MEM.MemWrite,
             MemRead = EX_MEM.MemRead,
@@ -150,6 +157,8 @@ void EX() {
         stages[2] += " fwd_DM-WB_rt_$" + std::to_string(MEM_WB_t.WriteDest);
     }
     uint32_t err;
+    EX_MEM.MemWrite = EX_MEM.MemRead = EX_MEM.RegWrite = false;
+    EX_MEM.isHILO = 0;
     switch (ID_EX.type) {
         case 'R': { err = R_execute(); break; }
         case 'I': { err = I_execute(); break; }
@@ -219,6 +228,7 @@ void ID() {
         (ID_EX.opcode == 0x04 || ID_EX.opcode == 0x05 || ID_EX.opcode == 0x07)) {
         // {14'{C[15]}, C, 2'b0}
         EX_MEM.MemWrite = EX_MEM.MemRead = EX_MEM.RegWrite = false;
+        EX_MEM.isHILO = 0;
         EX_MEM.WriteDest = ID_EX.rt;
         const int32_t Caddr = ID_EX.C >> 15 == 0x0 ? (0x0003ffff & (ID_EX.C << 2)) :
             (0xfffc0000 | (ID_EX.C << 2));
@@ -256,7 +266,6 @@ uint32_t R_execute() {
             rt_data = ID_EX.rt_data;
     uint32_t res = 0, err = 0;
     // EX_MEM
-    EX_MEM.MemWrite = EX_MEM.MemRead = false;
     EX_MEM.RegWrite = true;
     EX_MEM.WriteDest = ID_EX.rd;
     if (ID_EX.instr == 0) { // NOP
@@ -268,14 +277,20 @@ uint32_t R_execute() {
         mem.setPC(rs_data);
     } else if (funct == 0x18) {
         // mult (signed)
-        int64_t m = SignExt32(rs_data) * SignExt32(rt_data);
-        bool isOverwrite = reg.setHILO(m >> 32, m & 0x00000000ffffffff);
+        const int64_t m = SignExt32(rs_data) * SignExt32(rt_data);
+        const uint32_t HI = m >> 32, LO = m & 0x00000000ffffffff;
+        EX_MEM.isHILO = (HI == reg.getHI() ? 0x0 : 0x01) | (LO == reg.getLO() ? 0x0 : 0x10);
+        bool isOverwrite = reg.setHILO(HI, LO);
         err |= (isOverwrite ? ERR_OVERWRTIE_REG_HI_LO : 0);
+        EX_MEM.RegWrite = false;
     } else if (funct == 0x19) {
         // multu
-        uint64_t m = uint64_t(rs_data) * uint64_t(rt_data);
-        bool isOverwrite = reg.setHILO(m >> 32, m & 0x00000000ffffffff);
+        const uint64_t m = uint64_t(rs_data) * uint64_t(rt_data);
+        const uint32_t HI = m >> 32, LO = m & 0x00000000ffffffff;
+        EX_MEM.isHILO = (HI == reg.getHI() ? 0x0 : 0x01) | (LO == reg.getLO() ? 0x0 : 0x10);
+        bool isOverwrite = reg.setHILO(HI, LO);
         err |= (isOverwrite ? ERR_OVERWRTIE_REG_HI_LO : 0);
+        EX_MEM.RegWrite = false;
     } else {
         switch (funct) {
             // add (signed)
@@ -331,7 +346,6 @@ uint32_t I_execute() {
             C = ID_EX.C;
     uint32_t res = 0, err = 0;
     // EX_MEM
-    EX_MEM.MemWrite = EX_MEM.MemRead = false;
     EX_MEM.RegWrite = true;
     EX_MEM.WriteDest = ID_EX.rt;
     switch (opcode) {
@@ -382,7 +396,6 @@ uint32_t I_execute() {
 }
 
 uint32_t J_execute() {
-    EX_MEM.MemWrite = EX_MEM.MemRead = EX_MEM.RegWrite = false;
     if (ID_EX.opcode == 0x03) {
         // jal
         EX_MEM.ALU_Result = mem.getPC();

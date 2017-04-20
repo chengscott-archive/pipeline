@@ -10,7 +10,7 @@ struct IDEX_Buffer {
 };
 
 struct EXMEM_Buffer {
-    uint32_t instr = 0, opcode = 0, ALU_Result, WriteDest;
+    uint32_t instr = 0, opcode = 0, ALU_Result, WriteDest, isHILO = 0; // 0, HI: 1, LO: 2
     bool MemWrite = false, MemRead = false, RegWrite = false;
 };
 

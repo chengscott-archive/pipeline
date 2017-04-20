@@ -93,7 +93,8 @@ namespace IR {
                 default: return true;
             }
         }
-        if (opcode == 0x0F) return false;
+        if (opcode == 0x0F || opcode == 0x02 || opcode == 0x03 || opcode == 0x3F)
+            return false;
         return true;
     }
 
@@ -107,7 +108,8 @@ namespace IR {
                 default: return true;
             }
         }
-        if (opcode == 0x07) return false;
+        if (opcode == 0x07 || opcode == 0x02 || opcode == 0x03 || opcode == 0x3F)
+            return false;
         return true;
     }
 }
