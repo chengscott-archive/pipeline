@@ -6,11 +6,13 @@ int main() {
     mem.LoadInstr();
     uint32_t SP = mem.LoadData();
     reg.setReg(29, SP);
+    uint32_t err = 0;
     for (size_t cycle = 0; cycle <= 500000; ++cycle) {
+        // snapshot
         fprintf(snapshot, "cycle %zu\n", cycle);
         if (cycle == 0) {
             for (int i = 0; i < 32; ++i) {
-                fprintf(snapshot, "$%02d: 0x%08X\n", i, 0);
+                fprintf(snapshot, "$%02d: 0x%08X\n", i, reg.getReg(i));
             }
             fprintf(snapshot, "$HI: 0x%08X\n$LO: 0x%08X\n", 0, 0);
         }
@@ -24,17 +26,18 @@ int main() {
             fprintf(snapshot, "$LO: 0x%08X\n", reg.getLO());
         }
         fprintf(snapshot, "PC: 0x%08X\n", mem.getPC());
-        try {
-            WB();
-            MEM();
-            EX();
-            ID();
-            fprintf(snapshot, "IF: 0x%08X", mem.getInstr());
-            IF();
-        } catch (uint32_t err) {
-            dump_error(err, cycle);
-            // if (err & HALT) break;
-        }
+        // error_dump
+        dump_error(err, cycle);
+        if (err & HALT) break;
+        // execute
+        err = 0;
+        err |= WB();
+        err |= MEM();
+        err |= EX();
+        err |= ID();
+        fprintf(snapshot, "IF: 0x%08X", mem.getInstr());
+        err |= IF();
+        // snapshot
         fprintf(snapshot, "%s\nID: %s\nEX: %s\nDM: %s\nWB: %s\n\n\n",
             stages[0].c_str(), stages[1].c_str(), stages[2].c_str(),
             stages[3].c_str(), stages[4].c_str());
@@ -71,19 +74,20 @@ void dump_error(const uint32_t ex, const size_t cycle) {
 * Five Stages
 */
 
-void WB() {
+uint32_t WB() {
     stages[4] = IR::getOpName(MEM_WB.instr);
     MEM_WB_t = MEM_WB;
     const uint32_t& dest = MEM_WB.WriteDest, data = MEM_WB.rt_data;
     // print iff changed
     if (MEM_WB.RegWrite) {
-        MEM_WB_t.RegPrint = reg.getReg(dest) != data;
-        if (dest == 0) throw ERR_WRITE_REG_ZERO;
+        MEM_WB_t.RegPrint = dest != 0 && reg.getReg(dest) != data;
+        if (dest == 0) return ERR_WRITE_REG_ZERO;
         else reg.setReg(dest, data);
     }
+    return 0;
 }
 
-void MEM() {
+uint32_t MEM() {
     stages[3] = IR::getOpName(EX_MEM.instr);
     MEM_WB.instr = EX_MEM.instr;
     MEM_WB.rt_data = EX_MEM.ALU_Result;
@@ -99,7 +103,7 @@ void MEM() {
         err |= (ALU_Result >= 1024 || ALU_Result + 1 >= 1024 ||
             ALU_Result + 2 >= 1024 || ALU_Result + 3 >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
         err |= (ALU_Result % 4 != 0 ? ERR_MISALIGNMENT : 0);
-        if (err & HALT) throw err;
+        if (err & HALT) return err;
         mem.saveWord(EX_MEM.WriteDest, ALU_Result);
     } else if (opcode == 0x29 && MemWrite) { // sh
         err |= (ALU_Result >= 1024 || ALU_Result + 1 >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
@@ -128,10 +132,10 @@ void MEM() {
         err |= (ALU_Result >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
         MEM_WB.rt_data = mem.loadByte(ALU_Result) & 0xff;
     }
-    if (err != 0) throw err;
+    return err;
 }
 
-void EX() {
+uint32_t EX() {
     stages[2] = IR::getOpName(ID_EX.instr);
     EX_MEM.instr = ID_EX.instr;
     EX_MEM.opcode = ID_EX.opcode;
@@ -165,10 +169,10 @@ void EX() {
         case 'J': { err = J_execute(); break; }
         case 'S': default: { break; }
     }
-    if (err != 0) throw err;
+    return err;
 }
 
-void ID() {
+uint32_t ID() {
     const uint32_t& instr = IF_ID.instr;
     stages[1] = IR::getOpName(instr);
     // stall
@@ -184,7 +188,7 @@ void ID() {
         ID_EX.instr = ID_EX.opcode = ID_EX.rs = ID_EX.rt = ID_EX.rd
             = ID_EX.shamt = ID_EX.funct = ID_EX.C
             = ID_EX.rs_data = ID_EX.rt_data = 0;
-        return;
+        return 0;
     }
     // ID
     ID_EX.instr = instr;
@@ -239,7 +243,7 @@ void ID() {
                     ID_EX.instr = ID_EX.opcode = ID_EX.rs = ID_EX.rt = ID_EX.rd
                         = ID_EX.shamt = ID_EX.funct = ID_EX.C
                         = ID_EX.rs_data = ID_EX.rt_data = 0;
-                    return;
+                    return 0;
                 }
                 // fwd_EX-DM
                 if (MEM_WB.RegWrite && MEM_WB.WriteDest != 0 && MEM_WB.WriteDest == ID_EX.rs) {
@@ -275,24 +279,26 @@ void ID() {
             break;
         }
         default: {
-            throw ERR_ILLEGAL;
+            return ERR_ILLEGAL;
         }
     }
     // TODO: flush
+    return 0;
 }
 
-void IF() {
+uint32_t IF() {
     stages[0] = "";
     // stall
     if (stall) {
         stages[0] = " to_be_stalled";
         stall = false;
-        return;
+        return 0;
     }
     IF_ID.instr = mem.getInstr();
     mem.setPC(mem.getPC() + 4);
     IF_ID.rs = (IF_ID.instr >> 21) & 0x1f;
     IF_ID.rt = (IF_ID.instr >> 16) & 0x1f;
+    return 0;
 }
 
 /**
@@ -376,7 +382,6 @@ uint32_t R_execute() {
             case 0x12: { res = reg.fetchLO(); break; }
         }
         EX_MEM.ALU_Result = res;
-        if (ID_EX.rd == 0) err |= ERR_WRITE_REG_ZERO;
     }
     return err;
 }

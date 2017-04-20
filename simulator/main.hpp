@@ -37,11 +37,11 @@ MEMWB_Buffer MEM_WB, MEM_WB_t;
 FILE *snapshot, *error_dump;
 
 void dump_error(const uint32_t, const size_t);
-void WB();
-void MEM();
-void EX();
-void ID();
-void IF();
+uint32_t WB();
+uint32_t MEM();
+uint32_t EX();
+uint32_t ID();
+uint32_t IF();
 uint32_t R_execute();
 uint32_t I_execute();
 uint32_t J_execute();
