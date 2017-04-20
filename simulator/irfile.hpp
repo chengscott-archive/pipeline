@@ -5,16 +5,16 @@ namespace IR {
     char getType(const uint32_t rhs) {
         uint32_t opcode = (rhs >> 26) & 0x3f;
         switch (opcode) {
-            case 0x0:
+            case 0x00:
                 return 'R';
-            case 0x2: case 0x3:
-                return 'J';
-            case 0x3f:
-                return 'S';
             case 0x08: case 0x09: case 0x23: case 0x21: case 0x25: case 0x20:
             case 0x24: case 0x2B: case 0x29: case 0x28: case 0x0F: case 0x0C:
             case 0x0D: case 0x0E: case 0x0A: case 0x04: case 0x05: case 0x07:
                 return 'I';
+            case 0x02: case 0x03:
+                return 'J';
+            case 0x3f:
+                return 'S';
         }
         return 'F';
     }
@@ -46,9 +46,9 @@ namespace IR {
         if (instr == 0) return "NOP";
         const uint32_t opcode = (instr >> 26) & 0x3f;
         switch (opcode) {
-            case 0x0: return getFunctName(instr & 0x3f);
-            case 0x2: return "J";
-            case 0x3: return "JAL";
+            case 0x00: return getFunctName(instr & 0x3f);
+            case 0x02: return "J";
+            case 0x03: return "JAL";
             case 0x3f: return "HALT";
             case 0x08: return "ADDI";
             case 0x09: return "ADDIU";
@@ -93,7 +93,8 @@ namespace IR {
                 default: return true;
             }
         }
-        if (opcode == 0x0F || opcode == 0x02 || opcode == 0x03 || opcode == 0x3F)
+        if (opcode == 0x0F || opcode == 0x02 || opcode == 0x03 || opcode == 0x3F ||
+            opcode == 0x04 || opcode == 0x05 || opcode == 0x07)
             return false;
         return true;
     }
@@ -108,7 +109,8 @@ namespace IR {
                 default: return true;
             }
         }
-        if (opcode == 0x07 || opcode == 0x02 || opcode == 0x03 || opcode == 0x3F)
+        if (opcode == 0x07 || opcode == 0x02 || opcode == 0x03 || opcode == 0x3F ||
+            opcode == 0x04 || opcode == 0x05 || opcode == 0x07)
             return false;
         return true;
     }

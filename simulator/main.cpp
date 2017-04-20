@@ -199,9 +199,10 @@ void ID() {
             ID_EX.funct = instr & 0x3f;
             ID_EX.rs_data = reg.getReg(ID_EX.rs);
             ID_EX.rt_data = reg.getReg(ID_EX.rt);
-            switch (ID_EX.funct) {
-                case 0x00: case 0x02: case 0x03: { break; }
-                case 0x08: { break; } // jr
+            // jr
+            if (ID_EX.funct == 0x08) {
+                flush = true;
+                mem.setPC(ID_EX.rs);
             }
             break;
         }
@@ -212,9 +213,63 @@ void ID() {
             ID_EX.C = instr & 0xffff;
             ID_EX.rs_data = reg.getReg(ID_EX.rs);
             ID_EX.rt_data = reg.getReg(ID_EX.rt);
+            // beq, bne, bgtz (signed)
+            if (ID_EX.opcode == 0x04 || ID_EX.opcode == 0x05 || ID_EX.opcode == 0x07) {
+                // {14'{C[15]}, C, 2'b0}
+                const int32_t Caddr = ID_EX.C >> 15 == 0x0 ? (0x0003ffff & (ID_EX.C << 2)) :
+                    (0xfffc0000 | (ID_EX.C << 2));
+                // stall
+                if (EX_MEM.RegWrite && EX_MEM.WriteDest != 0 && EX_MEM.WriteDest == IF_ID.rs) {
+                    stall = true;
+                }
+                if (IR::isMemRead(MEM_WB.instr) && EX_MEM.WriteDest == IF_ID.rs) {
+                    stall = true;
+                }
+                bool has_rt = ID_EX.opcode != 0x07;
+                if (EX_MEM.RegWrite && EX_MEM.WriteDest != 0 && has_rt && EX_MEM.WriteDest == IF_ID.rt) {
+                    stall = true;
+                }
+                if (IR::isMemRead(MEM_WB.instr) && MEM_WB.WriteDest == IF_ID.rt) {
+                    stall = true;
+                }
+                if (stall) {
+                    stall = true;
+                    stages[1] += " to_be_stalled";
+                    ID_EX.type = 'R';
+                    ID_EX.instr = ID_EX.opcode = ID_EX.rs = ID_EX.rt = ID_EX.rd
+                        = ID_EX.shamt = ID_EX.funct = ID_EX.C
+                        = ID_EX.rs_data = ID_EX.rt_data = 0;
+                    return;
+                }
+                // fwd_EX-DM
+                if (MEM_WB.RegWrite && MEM_WB.WriteDest != 0 && MEM_WB.WriteDest == ID_EX.rs) {
+                    ID_EX.rs_data = MEM_WB.rt_data;
+                    stages[1] += " fwd_EX-DM_rs_$" + std::to_string(ID_EX.rs);
+                }
+                if (MEM_WB.RegWrite && MEM_WB.WriteDest != 0 && ID_EX.opcode != 0x07 && MEM_WB.WriteDest == ID_EX.rt) {
+                    ID_EX.rt_data = MEM_WB.rt_data;
+                    stages[1] += " fwd_EX-DM_rt_$" + std::to_string(ID_EX.rt);
+                }
+                if ((ID_EX.opcode == 0x04 && ID_EX.rs_data == ID_EX.rt_data) ||
+                    (ID_EX.opcode == 0x05 && ID_EX.rs_data != ID_EX.rt_data) ||
+                    (ID_EX.opcode == 0x07 && int32_t(ID_EX.rs_data) > 0))
+                {
+                    flush = true;
+                    mem.setPC(int32_t(mem.getPC()) + Caddr);
+                }
+            }
             break;
         }
-        case 'J': case 'S': {
+        case 'J': {
+            ID_EX.opcode = (instr >> 26) & 0x3f;
+            ID_EX.C = instr & 0x3ffffff;
+            ID_EX.jalPC = mem.getPC();
+            // j && jal: PC = {(PC+4)[31:28], C, 2'b0}
+            flush = true;
+            mem.setPC((mem.getPC() & 0xf0000000) | (ID_EX.C << 2));
+            break;
+        }
+        case 'S': {
             ID_EX.opcode = (instr >> 26) & 0x3f;
             ID_EX.C = instr & 0x3ffffff;
             break;
@@ -223,20 +278,7 @@ void ID() {
             throw ERR_ILLEGAL;
         }
     }
-    // beq, bne, bgtz (signed)
-    if (ID_EX.type == 'I' &&
-        (ID_EX.opcode == 0x04 || ID_EX.opcode == 0x05 || ID_EX.opcode == 0x07)) {
-        // {14'{C[15]}, C, 2'b0}
-        EX_MEM.MemWrite = EX_MEM.MemRead = EX_MEM.RegWrite = false;
-        EX_MEM.isHILO = 0;
-        EX_MEM.WriteDest = ID_EX.rt;
-        const int32_t Caddr = ID_EX.C >> 15 == 0x0 ? (0x0003ffff & (ID_EX.C << 2)) :
-            (0xfffc0000 | (ID_EX.C << 2));
-        if ((ID_EX.opcode == 0x04 && ID_EX.rs_data == ID_EX.rt_data) ||
-            (ID_EX.opcode == 0x05 && ID_EX.rs_data != ID_EX.rt_data) ||
-            (ID_EX.opcode == 0x07 && int32_t(ID_EX.rs_data) > 0))
-            mem.setPC(int32_t(mem.getPC()) + Caddr);
-    }
+    // TODO: flush
 }
 
 void IF() {
@@ -396,13 +438,11 @@ uint32_t I_execute() {
 }
 
 uint32_t J_execute() {
+    // jal
     if (ID_EX.opcode == 0x03) {
-        // jal
-        EX_MEM.ALU_Result = mem.getPC();
+        EX_MEM.ALU_Result = ID_EX.jalPC;
         EX_MEM.WriteDest = 31;
         EX_MEM.RegWrite = true;
     }
-    // j && jal: PC = {(PC+4)[31:28], C, 2'b0}
-    mem.setPC((mem.getPC() & 0xf0000000) | (ID_EX.C << 2));
     return 0;
 }

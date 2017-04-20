@@ -6,7 +6,7 @@ struct IFID_Buffer {
 
 struct IDEX_Buffer {
     char type = 'R';
-    uint32_t instr = 0, opcode, rs, rt, rd, shamt, funct, C, rs_data, rt_data;
+    uint32_t instr = 0, opcode, rs, rt, rd, shamt, funct, C, rs_data, rt_data, jalPC;
 };
 
 struct EXMEM_Buffer {
