@@ -4,40 +4,20 @@ int main() {
     snapshot = fopen("snapshot.rpt", "w");
     error_dump = fopen("error_dump.rpt", "w");
     mem.LoadInstr();
-    uint32_t SP = mem.LoadData();
+    const uint32_t SP = mem.LoadData();
     reg.setReg(29, SP);
     uint32_t err = 0;
     for (size_t cycle = 0; cycle <= 500000; ++cycle) {
-        // snapshot
-        fprintf(snapshot, "cycle %zu\n", cycle);
-        if (cycle == 0) {
-            for (int i = 0; i < 32; ++i) {
-                fprintf(snapshot, "$%02d: 0x%08X\n", i, reg.getReg(i));
-            }
-            fprintf(snapshot, "$HI: 0x%08X\n$LO: 0x%08X\n", 0, 0);
-        }
-        if (MEM_WB_t.RegPrint) {
-            fprintf(snapshot, "$%02d: 0x%08X\n", MEM_WB_t.WriteDest, MEM_WB_t.rt_data);
-        }
-        if (EX_MEM.isHILO & 0x01) {
-            fprintf(snapshot, "$HI: 0x%08X\n", reg.getHI());
-        }
-        if (EX_MEM.isHILO & 0x10) {
-            fprintf(snapshot, "$LO: 0x%08X\n", reg.getLO());
-        }
-        fprintf(snapshot, "PC: 0x%08X\n", mem.getPC());
-        // error_dump
         dump_error(err, cycle);
         if (err & HALT) break;
-        // execute
+        dump_reg(cycle);
         err = 0;
         err |= WB();
         err |= MEM();
         err |= EX();
-        err |= ID();
         fprintf(snapshot, "IF: 0x%08X", mem.getInstr());
+        err |= ID();
         err |= IF();
-        // snapshot
         fprintf(snapshot, "%s\nID: %s\nEX: %s\nDM: %s\nWB: %s\n\n\n",
             stages[0].c_str(), stages[1].c_str(), stages[2].c_str(),
             stages[3].c_str(), stages[4].c_str());
@@ -49,12 +29,29 @@ int main() {
     return 0;
 }
 
+void dump_reg(const size_t cycle) {
+    fprintf(snapshot, "cycle %zu\n", cycle);
+    if (cycle == 0) {
+        for (int i = 0; i < 32; ++i) {
+            fprintf(snapshot, "$%02d: 0x%08X\n", i, reg.getReg(i));
+        }
+        fprintf(snapshot, "$HI: 0x%08X\n$LO: 0x%08X\n", 0, 0);
+    }
+    if (MEM_WB_t.RegPrint) {
+        fprintf(snapshot, "$%02d: 0x%08X\n", MEM_WB_t.WriteDest, MEM_WB_t.rt_data);
+    }
+    if (EX_MEM.isHILO & 0x01) {
+        fprintf(snapshot, "$HI: 0x%08X\n", reg.getHI());
+    }
+    if (EX_MEM.isHILO & 0x10) {
+        fprintf(snapshot, "$LO: 0x%08X\n", reg.getLO());
+    }
+    fprintf(snapshot, "PC: 0x%08X\n", mem.getPC());
+}
+
 void dump_error(const uint32_t ex, const size_t cycle) {
     if (ex & ERR_WRITE_REG_ZERO) {
         fprintf(error_dump, "In cycle %zu: Write $0 Error\n", cycle);
-    }
-    if (ex & ERR_NUMBER_OVERFLOW) {
-        fprintf(error_dump, "In cycle %zu: Number Overflow\n", cycle);
     }
     if (ex & ERR_OVERWRTIE_REG_HI_LO) {
         fprintf(error_dump, "In cycle %zu: Overwrite HI-LO registers\n", cycle);
@@ -64,6 +61,9 @@ void dump_error(const uint32_t ex, const size_t cycle) {
     }
     if (ex & ERR_MISALIGNMENT) {
         fprintf(error_dump, "In cycle %zu: Misalignment Error\n", cycle);
+    }
+    if (ex & ERR_NUMBER_OVERFLOW) {
+        fprintf(error_dump, "In cycle %zu: Number Overflow\n", cycle);
     }
     if (ex & ERR_ILLEGAL) {
         printf("illegal instruction found at 0x%08X\n", mem.getPC());
@@ -96,40 +96,48 @@ uint32_t MEM() {
     const uint32_t& opcode = EX_MEM.opcode,
             MemWrite = EX_MEM.MemWrite,
             MemRead = EX_MEM.MemRead,
+            WriteDest = EX_MEM.WriteDest,
             ALU_Result = EX_MEM.ALU_Result;
     uint32_t err = 0;
-    // TODO: add overflow: sw, sh, lw, lh, lhu
+    // add overflow: sw, sh, lw, lh, lhu
     if (opcode == 0x2B && MemWrite) { // sw
-        err |= (ALU_Result >= 1024 || ALU_Result + 1 >= 1024 ||
-            ALU_Result + 2 >= 1024 || ALU_Result + 3 >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
-        err |= (ALU_Result % 4 != 0 ? ERR_MISALIGNMENT : 0);
+        err |= (WriteDest >= 1024 || WriteDest + 1 >= 1024 ||
+            WriteDest + 2 >= 1024 || WriteDest + 3 >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
+        err |= (WriteDest % 4 != 0 ? ERR_MISALIGNMENT : 0);
         if (err & HALT) return err;
-        mem.saveWord(EX_MEM.WriteDest, ALU_Result);
+        mem.saveWord(WriteDest, ALU_Result);
     } else if (opcode == 0x29 && MemWrite) { // sh
-        err |= (ALU_Result >= 1024 || ALU_Result + 1 >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
-        err |= (ALU_Result % 2 != 0 ? ERR_MISALIGNMENT : 0);
-        mem.saveHalfWord(EX_MEM.WriteDest, ALU_Result);
+        err |= (WriteDest >= 1024 || WriteDest + 1 >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
+        err |= (WriteDest % 2 != 0 ? WriteDest : 0);
+        if (err & HALT) return err;
+        mem.saveHalfWord(WriteDest, ALU_Result);
     } else if (opcode == 0x28 && MemWrite) { // sb
-        err |= (ALU_Result >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
-        mem.saveByte(EX_MEM.WriteDest, ALU_Result);
+        err |= (WriteDest >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
+        if (err & HALT) return err;
+        mem.saveByte(WriteDest, ALU_Result);
     } else if (opcode == 0x23 && MemRead) { // lw
         err |= (ALU_Result >= 1024 || ALU_Result + 1 >= 1024 ||
             ALU_Result + 2 >= 1024 || ALU_Result + 3 >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
         err |= (ALU_Result % 4 != 0 ? ERR_MISALIGNMENT : 0);
+        if (err & HALT) return err;
         MEM_WB.rt_data = mem.loadWord(ALU_Result);
     } else if (opcode == 0x21 && MemRead) { // lh
         err |= (ALU_Result >= 1024 || ALU_Result + 1 >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
         err |= (ALU_Result % 2 != 0 ? ERR_MISALIGNMENT : 0);
+        if (err & HALT) return err;
         MEM_WB.rt_data = SignExt16(mem.loadHalfWord(ALU_Result));
     } else if (opcode == 0x25 && MemRead) { // lhu
         err |= (ALU_Result >= 1024 || ALU_Result + 1 >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
         err |= (ALU_Result % 2 != 0 ? ERR_MISALIGNMENT : 0);
+        if (err & HALT) return err;
         MEM_WB.rt_data = mem.loadHalfWord(ALU_Result) & 0xffff;
     } else if (opcode == 0x20 && MemRead) { // lb
         err |= (ALU_Result >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
+        if (err & HALT) return err;
         MEM_WB.rt_data = SignExt8(mem.loadByte(ALU_Result));
     } else if (opcode == 0x24 && MemRead) { // lbu
         err |= (ALU_Result >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
+        if (err & HALT) return err;
         MEM_WB.rt_data = mem.loadByte(ALU_Result) & 0xff;
     }
     return err;
@@ -140,22 +148,22 @@ uint32_t EX() {
     EX_MEM.instr = ID_EX.instr;
     EX_MEM.opcode = ID_EX.opcode;
     // fwd_EX-DM, fwd_DM-WB
-    bool has_rs = IR::has_rs(EX_MEM.instr);
-    if (EX_MEM.RegWrite && EX_MEM.WriteDest != 0 && has_rs && EX_MEM.WriteDest == ID_EX.rs) {
+    bool fwd_rs = IR::fwd_rs(EX_MEM.instr);
+    if (EX_MEM.RegWrite && EX_MEM.WriteDest != 0 && fwd_rs && EX_MEM.WriteDest == ID_EX.rs) {
         ID_EX.rs = EX_MEM.WriteDest;
         ID_EX.rs_data = EX_MEM.ALU_Result;
         stages[2] += " fwd_EX-DM_rs_$" + std::to_string(EX_MEM.WriteDest);
-    } else if (MEM_WB_t.RegWrite && MEM_WB_t.WriteDest != 0 && has_rs && MEM_WB_t.WriteDest == ID_EX.rs) {
+    } else if (MEM_WB_t.RegWrite && MEM_WB_t.WriteDest != 0 && fwd_rs && MEM_WB_t.WriteDest == ID_EX.rs) {
         ID_EX.rs = MEM_WB_t.WriteDest;
         ID_EX.rs_data = MEM_WB_t.rt_data;
         stages[2] += " fwd_DM-WB_rs_$" + std::to_string(MEM_WB_t.WriteDest);
     }
-    bool has_rt = IR::has_rt(EX_MEM.instr);
-    if (EX_MEM.RegWrite && EX_MEM.WriteDest != 0 && has_rt && EX_MEM.WriteDest == ID_EX.rt) {
+    bool fwd_rt = IR::fwd_rt(EX_MEM.instr);
+    if (EX_MEM.RegWrite && EX_MEM.WriteDest != 0 && fwd_rt && EX_MEM.WriteDest == ID_EX.rt) {
         ID_EX.rt = EX_MEM.WriteDest;
         ID_EX.rt_data = EX_MEM.ALU_Result;
         stages[2] += " fwd_EX-DM_rt_$" + std::to_string(EX_MEM.WriteDest);
-    } else if (MEM_WB_t.RegWrite && MEM_WB_t.WriteDest != 0 && has_rt && MEM_WB_t.WriteDest == ID_EX.rt) {
+    } else if (MEM_WB_t.RegWrite && MEM_WB_t.WriteDest != 0 && fwd_rt && MEM_WB_t.WriteDest == ID_EX.rt) {
         ID_EX.rt = MEM_WB_t.WriteDest;
         ID_EX.rt_data = MEM_WB_t.rt_data;
         stages[2] += " fwd_DM-WB_rt_$" + std::to_string(MEM_WB_t.WriteDest);
@@ -282,7 +290,6 @@ uint32_t ID() {
             return ERR_ILLEGAL;
         }
     }
-    // TODO: flush
     return 0;
 }
 
@@ -292,6 +299,13 @@ uint32_t IF() {
     if (stall) {
         stages[0] = " to_be_stalled";
         stall = false;
+        return 0;
+    }
+    // flush
+    if (flush) {
+        stages[0] = " to_be_flushed";
+        IF_ID.instr = IF_ID.rs = IF_ID.rt = 0;
+        flush = false;
         return 0;
     }
     IF_ID.instr = mem.getInstr();
@@ -316,7 +330,7 @@ uint32_t R_execute() {
     // EX_MEM
     EX_MEM.RegWrite = true;
     EX_MEM.WriteDest = ID_EX.rd;
-    if (ID_EX.instr == 0) { // NOP
+    if (ID_EX.rt == 0 && ID_EX.rd == 0 && ID_EX.shamt == 0 && ID_EX.funct == 0) { // NOP
         EX_MEM.RegWrite = false;
         return 0;
     }
@@ -437,6 +451,7 @@ uint32_t I_execute() {
             EX_MEM.MemRead = true;
             break;
         }
+        default: { EX_MEM.RegWrite = false; }
     }
     EX_MEM.ALU_Result = res;
     return err;

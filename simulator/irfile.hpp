@@ -43,7 +43,7 @@ namespace IR {
     }
 
     std::string getOpName(const uint32_t instr) {
-        if (instr == 0) return "NOP";
+        if ((instr & 0x1FFFFF) == 0) return "NOP";
         const uint32_t opcode = (instr >> 26) & 0x3f;
         switch (opcode) {
             case 0x00: return getFunctName(instr & 0x3f);
@@ -83,7 +83,7 @@ namespace IR {
         return false;
     }
 
-    bool has_rs(const uint32_t instr) {
+    bool fwd_rs(const uint32_t instr) {
         const uint32_t opcode = (instr >> 26) & 0x3f;
         if (instr == 0) return false;
         if (opcode == 0x00) {
@@ -99,7 +99,7 @@ namespace IR {
         return true;
     }
 
-    bool has_rt(const uint32_t instr) {
+    bool fwd_rt(const uint32_t instr) {
         const uint32_t opcode = (instr >> 26) & 0x3f;
         if (instr == 0) return false;
         if (opcode == 0x00) {
@@ -109,9 +109,6 @@ namespace IR {
                 default: return true;
             }
         }
-        if (opcode == 0x07 || opcode == 0x02 || opcode == 0x03 || opcode == 0x3F ||
-            opcode == 0x04 || opcode == 0x05 || opcode == 0x07)
-            return false;
-        return true;
+        return false;
     }
 }

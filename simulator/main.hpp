@@ -36,6 +36,7 @@ EXMEM_Buffer EX_MEM;
 MEMWB_Buffer MEM_WB, MEM_WB_t;
 FILE *snapshot, *error_dump;
 
+void dump_reg(const size_t);
 void dump_error(const uint32_t, const size_t);
 uint32_t WB();
 uint32_t MEM();
