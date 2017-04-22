@@ -43,10 +43,12 @@ namespace IR {
     }
 
     std::string getOpName(const uint32_t instr) {
-        if ((instr & 0x1FFFFF) == 0) return "NOP";
         const uint32_t opcode = (instr >> 26) & 0x3f;
         switch (opcode) {
-            case 0x00: return getFunctName(instr & 0x3f);
+            case 0x00: {
+                if ((instr & 0x1FFFFF) == 0) return "NOP";
+                return getFunctName(instr & 0x3f);
+            }
             case 0x02: return "J";
             case 0x03: return "JAL";
             case 0x3f: return "HALT";
@@ -83,32 +85,37 @@ namespace IR {
         return false;
     }
 
-    bool fwd_rs(const uint32_t instr) {
+    bool has_rs(const uint32_t instr) {
         const uint32_t opcode = (instr >> 26) & 0x3f;
-        if (instr == 0) return false;
         if (opcode == 0x00) {
             const uint32_t funct = instr & 0x3f;
             switch (funct) {
-                case 0x00: case 0x02: case 0x03: case 0x10: case 0x12: return false;
+                // sll (NOP), srl, sra, jr, mfhi, mflo
+                case 0x00: case 0x02: case 0x03: case 0x08: case 0x10: case 0x12: return false;
                 default: return true;
             }
         }
-        if (opcode == 0x0F || opcode == 0x02 || opcode == 0x03 || opcode == 0x3F ||
+        // lui, j, jal, halt, beq, bne, bgtz
+        else if (opcode == 0x0F || opcode == 0x02 || opcode == 0x03 || opcode == 0x3F ||
             opcode == 0x04 || opcode == 0x05 || opcode == 0x07)
             return false;
         return true;
     }
 
-    bool fwd_rt(const uint32_t instr) {
+    bool has_rt(const uint32_t instr) {
         const uint32_t opcode = (instr >> 26) & 0x3f;
-        if (instr == 0) return false;
         if (opcode == 0x00) {
+            if ((instr & 0x1FFFFF) == 0) return false; // NOP
             const uint32_t funct = instr & 0x3f;
             switch (funct) {
+                // jr, mfhi, mflo
                 case 0x08: case 0x10: case 0x12: return false;
                 default: return true;
             }
         }
+        // sw, sh, sb
+        else if (opcode == 0x2B || opcode == 0x29 || opcode == 0x28)
+            return true;
         return false;
     }
 }

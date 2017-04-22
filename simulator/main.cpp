@@ -108,7 +108,7 @@ uint32_t MEM() {
         mem.saveWord(WriteDest, ALU_Result);
     } else if (opcode == 0x29 && MemWrite) { // sh
         err |= (WriteDest >= 1024 || WriteDest + 1 >= 1024 ? ERR_ADDRESS_OVERFLOW : 0);
-        err |= (WriteDest % 2 != 0 ? WriteDest : 0);
+        err |= (WriteDest % 2 != 0 ? ERR_MISALIGNMENT : 0);
         if (err & HALT) return err;
         mem.saveHalfWord(WriteDest, ALU_Result);
     } else if (opcode == 0x28 && MemWrite) { // sb
@@ -148,22 +148,22 @@ uint32_t EX() {
     EX_MEM.instr = ID_EX.instr;
     EX_MEM.opcode = ID_EX.opcode;
     // fwd_EX-DM, fwd_DM-WB
-    bool fwd_rs = IR::fwd_rs(EX_MEM.instr);
-    if (EX_MEM.RegWrite && EX_MEM.WriteDest != 0 && fwd_rs && EX_MEM.WriteDest == ID_EX.rs) {
+    bool fwd_rs = IR::has_rs(EX_MEM.instr);
+    if (EX_MEM.RegWrite && fwd_rs && EX_MEM.WriteDest != 0 && EX_MEM.WriteDest == ID_EX.rs) {
         ID_EX.rs = EX_MEM.WriteDest;
         ID_EX.rs_data = EX_MEM.ALU_Result;
         stages[2] += " fwd_EX-DM_rs_$" + std::to_string(EX_MEM.WriteDest);
-    } else if (MEM_WB_t.RegWrite && MEM_WB_t.WriteDest != 0 && fwd_rs && MEM_WB_t.WriteDest == ID_EX.rs) {
+    } else if (MEM_WB_t.RegWrite && fwd_rs && MEM_WB_t.WriteDest != 0 && MEM_WB_t.WriteDest == ID_EX.rs) {
         ID_EX.rs = MEM_WB_t.WriteDest;
         ID_EX.rs_data = MEM_WB_t.rt_data;
         stages[2] += " fwd_DM-WB_rs_$" + std::to_string(MEM_WB_t.WriteDest);
     }
-    bool fwd_rt = IR::fwd_rt(EX_MEM.instr);
-    if (EX_MEM.RegWrite && EX_MEM.WriteDest != 0 && fwd_rt && EX_MEM.WriteDest == ID_EX.rt) {
+    bool fwd_rt = IR::has_rt(EX_MEM.instr);
+    if (EX_MEM.RegWrite && fwd_rt && EX_MEM.WriteDest != 0 && EX_MEM.WriteDest == ID_EX.rt) {
         ID_EX.rt = EX_MEM.WriteDest;
         ID_EX.rt_data = EX_MEM.ALU_Result;
         stages[2] += " fwd_EX-DM_rt_$" + std::to_string(EX_MEM.WriteDest);
-    } else if (MEM_WB_t.RegWrite && MEM_WB_t.WriteDest != 0 && fwd_rt && MEM_WB_t.WriteDest == ID_EX.rt) {
+    } else if (MEM_WB_t.RegWrite && fwd_rt && MEM_WB_t.WriteDest != 0 && MEM_WB_t.WriteDest == ID_EX.rt) {
         ID_EX.rt = MEM_WB_t.WriteDest;
         ID_EX.rt_data = MEM_WB_t.rt_data;
         stages[2] += " fwd_DM-WB_rt_$" + std::to_string(MEM_WB_t.WriteDest);
@@ -184,10 +184,12 @@ uint32_t ID() {
     const uint32_t& instr = IF_ID.instr;
     stages[1] = IR::getOpName(instr);
     // stall
-    if (IR::isMemRead(ID_EX.instr) && IF_ID.rs != 0 && ID_EX.rt == IF_ID.rs) {
+    bool stall_rs = IR::has_rs(IF_ID.instr);
+    if (IR::isMemRead(ID_EX.instr) && stall_rs && IF_ID.rs != 0 && ID_EX.rt == IF_ID.rs) {
         stall = true;
     }
-    if (IR::isMemRead(ID_EX.instr) && IF_ID.rt != 0 && ID_EX.rt == IF_ID.rt) {
+    bool stall_rt = IR::has_rt(IF_ID.instr);
+    if (IR::isMemRead(ID_EX.instr) && stall_rt && IF_ID.rt != 0 && ID_EX.rt == IF_ID.rt) {
         stall = true;
     }
     if (stall) {
@@ -213,8 +215,29 @@ uint32_t ID() {
             ID_EX.rt_data = reg.getReg(ID_EX.rt);
             // jr
             if (ID_EX.funct == 0x08) {
+                // stall
+                if (EX_MEM.RegWrite && EX_MEM.WriteDest != 0 && EX_MEM.WriteDest == IF_ID.rs) {
+                    stall = true;
+                }
+                if (IR::isMemRead(MEM_WB.instr) && MEM_WB.WriteDest == IF_ID.rs) {
+                    stall = true;
+                }
+                if (stall) {
+                    stall = true;
+                    stages[1] += " to_be_stalled";
+                    ID_EX.type = 'R';
+                    ID_EX.instr = ID_EX.opcode = ID_EX.rs = ID_EX.rt = ID_EX.rd
+                        = ID_EX.shamt = ID_EX.funct = ID_EX.C
+                        = ID_EX.rs_data = ID_EX.rt_data = 0;
+                    return 0;
+                }
+                // fwd_EX-DM
+                if (MEM_WB.RegWrite && MEM_WB.WriteDest != 0 && MEM_WB.WriteDest == ID_EX.rs) {
+                    ID_EX.rs_data = MEM_WB.rt_data;
+                    stages[1] += " fwd_EX-DM_rs_$" + std::to_string(ID_EX.rs);
+                }
                 flush = true;
-                mem.setPC(ID_EX.rs);
+                mem.setPC(ID_EX.rs_data);
             }
             break;
         }
@@ -234,7 +257,7 @@ uint32_t ID() {
                 if (EX_MEM.RegWrite && EX_MEM.WriteDest != 0 && EX_MEM.WriteDest == IF_ID.rs) {
                     stall = true;
                 }
-                if (IR::isMemRead(MEM_WB.instr) && EX_MEM.WriteDest == IF_ID.rs) {
+                if (IR::isMemRead(MEM_WB.instr) && MEM_WB.WriteDest == IF_ID.rs) {
                     stall = true;
                 }
                 bool has_rt = ID_EX.opcode != 0x07;
@@ -336,7 +359,8 @@ uint32_t R_execute() {
     }
     if (funct == 0x08) {
         // jr
-        mem.setPC(rs_data);
+        EX_MEM.RegWrite = false;
+        //mem.setPC(rs_data);
     } else if (funct == 0x18) {
         // mult (signed)
         const int64_t m = SignExt32(rs_data) * SignExt32(rt_data);
