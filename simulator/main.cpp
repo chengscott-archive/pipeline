@@ -6,7 +6,7 @@ int main() {
     mem.LoadInstr();
     const uint32_t SP = mem.LoadData();
     reg.setReg(29, SP);
-    uint32_t err = 0;
+    uint32_t err = 0, instr;
     for (size_t cycle = 0; cycle <= 500000; ++cycle) {
         dump_error(err, cycle);
         if (err & HALT) break;
@@ -15,11 +15,15 @@ int main() {
         err |= WB();
         err |= MEM();
         err |= EX();
-        fprintf(snapshot, "IF: 0x%08X", mem.getInstr());
+        instr = mem.getInstr();
         err |= ID();
+        if (err & ERR_ILLEGAL) {
+            printf("illegal instruction found at 0x%X\n", mem.getPC());
+            break;
+        }
         err |= IF();
-        fprintf(snapshot, "%s\nID: %s\nEX: %s\nDM: %s\nWB: %s\n\n\n",
-            stages[0].c_str(), stages[1].c_str(), stages[2].c_str(),
+        fprintf(snapshot, "IF: 0x%08X%s\nID: %s\nEX: %s\nDM: %s\nWB: %s\n\n\n",
+            instr, stages[0].c_str(), stages[1].c_str(), stages[2].c_str(),
             stages[3].c_str(), stages[4].c_str());
         if (IR::getOpName(IF_ID.instr) == "HALT" && stages[1] == "HALT" &&
             stages[2] == "HALT" && stages[3] == "HALT" && stages[4] == "HALT") break;
@@ -64,9 +68,6 @@ void dump_error(const uint32_t ex, const size_t cycle) {
     }
     if (ex & ERR_NUMBER_OVERFLOW) {
         fprintf(error_dump, "In cycle %zu: Number Overflow\n", cycle);
-    }
-    if (ex & ERR_ILLEGAL) {
-        printf("illegal instruction found at 0x%08X\n", mem.getPC());
     }
 }
 
@@ -219,7 +220,7 @@ uint32_t ID() {
                 if (EX_MEM.RegWrite && EX_MEM.WriteDest != 0 && EX_MEM.WriteDest == IF_ID.rs) {
                     stall = true;
                 }
-                if (IR::isMemRead(MEM_WB.instr) && MEM_WB.WriteDest == IF_ID.rs) {
+                if (IR::isMemRead(MEM_WB.instr) && MEM_WB.WriteDest != 0 && MEM_WB.WriteDest == IF_ID.rs) {
                     stall = true;
                 }
                 if (stall) {
@@ -257,14 +258,14 @@ uint32_t ID() {
                 if (EX_MEM.RegWrite && EX_MEM.WriteDest != 0 && EX_MEM.WriteDest == IF_ID.rs) {
                     stall = true;
                 }
-                if (IR::isMemRead(MEM_WB.instr) && MEM_WB.WriteDest == IF_ID.rs) {
+                if (IR::isMemRead(MEM_WB.instr) && MEM_WB.WriteDest != 0 && MEM_WB.WriteDest == IF_ID.rs) {
                     stall = true;
                 }
                 bool has_rt = ID_EX.opcode != 0x07;
                 if (EX_MEM.RegWrite && EX_MEM.WriteDest != 0 && has_rt && EX_MEM.WriteDest == IF_ID.rt) {
                     stall = true;
                 }
-                if (IR::isMemRead(MEM_WB.instr) && MEM_WB.WriteDest == IF_ID.rt) {
+                if (IR::isMemRead(MEM_WB.instr) && MEM_WB.WriteDest != 0 && MEM_WB.WriteDest == IF_ID.rt) {
                     stall = true;
                 }
                 if (stall) {
