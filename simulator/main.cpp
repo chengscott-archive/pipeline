@@ -57,15 +57,16 @@ void dump_error(const uint32_t ex, const size_t cycle) {
     if (ex & ERR_WRITE_REG_ZERO) {
         fprintf(error_dump, "In cycle %zu: Write $0 Error\n", cycle);
     }
-    if (ex & ERR_OVERWRTIE_REG_HI_LO) {
-        fprintf(error_dump, "In cycle %zu: Overwrite HI-LO registers\n", cycle);
-    }
     if (ex & ERR_ADDRESS_OVERFLOW) {
         fprintf(error_dump, "In cycle %zu: Address Overflow\n", cycle);
     }
     if (ex & ERR_MISALIGNMENT) {
         fprintf(error_dump, "In cycle %zu: Misalignment Error\n", cycle);
     }
+    if (ex & ERR_OVERWRTIE_REG_HI_LO) {
+        fprintf(error_dump, "In cycle %zu: Overwrite HI-LO registers\n", cycle);
+    }
+
     if (ex & ERR_NUMBER_OVERFLOW) {
         fprintf(error_dump, "In cycle %zu: Number Overflow\n", cycle);
     }
